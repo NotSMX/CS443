@@ -1,6 +1,6 @@
 '''image_datasets.py
 Functions to load and preprocess image datasets
-YOUR NAMES HERE
+Daniel Yu & Jordan Wang
 CS 443: Bio-Inspired Machine Learning
 Project 1: Hebbian Learning
 '''
@@ -43,7 +43,75 @@ def get_dataset(name, norm_method='global', flatten=True, eps=1e-10, verbose=Tru
     2. Min-max normalize the images features to floats between 0-1 before performing any addition preprocessing.
     3. This function (and the file more generally) should be written in TensorFlow. You should not import NumPy.
     '''
-    pass
+    name = name.lower()
+
+    # --------------------------------------------------
+    # Load dataset
+    # --------------------------------------------------
+    if name == 'cifar10':
+        (x_train, y_train), (x_test, y_test) = tf.keras.datasets.cifar10.load_data()
+        n_chans = 3
+
+    elif name == 'mnist':
+        (x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
+
+        # Add singleton channel dimension: (N, 28, 28) -> (N, 28, 28, 1)
+        x_train = tf.expand_dims(x_train, axis=-1)
+        x_test  = tf.expand_dims(x_test, axis=-1)
+        n_chans = 1
+
+    else:
+        raise ValueError(f"Unsupported dataset: {name}")
+
+    # Labels come as (N, 1) for CIFAR-10; ensure (N,)
+    y_train = tf.squeeze(y_train)
+    y_test  = tf.squeeze(y_test)
+
+    # --------------------------------------------------
+    # Convert to float and scale to [0, 1]
+    # --------------------------------------------------
+    x_train = tf.cast(x_train, tf.float32) / 255.0
+    x_test  = tf.cast(x_test, tf.float32) / 255.0
+
+    # --------------------------------------------------
+    # Global preprocessing (computed on training set)
+    # --------------------------------------------------
+    if norm_method in ['global', 'center']:
+        mean = tf.reduce_mean(x_train, axis=[0, 1, 2])
+
+        if norm_method == 'global':
+            std = tf.math.reduce_std(x_train, axis=[0, 1, 2])
+            x_train = (x_train - mean) / (std + eps)
+            x_test  = (x_test  - mean) / (std + eps)
+
+        elif norm_method == 'center':
+            x_train = x_train - mean
+            x_test  = x_test  - mean
+
+    elif norm_method == 'none':
+        pass
+
+    else:
+        raise ValueError(f"Unsupported norm_method: {norm_method}")
+
+    # --------------------------------------------------
+    # Optional flattening
+    # --------------------------------------------------
+    if flatten:
+        x_train = tf.reshape(x_train, [tf.shape(x_train)[0], -1])
+        x_test  = tf.reshape(x_test,  [tf.shape(x_test)[0], -1])
+
+    # --------------------------------------------------
+    # Verbose output
+    # --------------------------------------------------
+    if verbose:
+        print(f"Dataset: {name}")
+        print("x_train:", x_train.shape, x_train.dtype)
+        print("y_train:", y_train.shape, y_train.dtype)
+        print("x_test: ", x_test.shape, x_test.dtype)
+        print("y_test: ", y_test.shape, y_test.dtype)
+
+    return x_train, y_train, x_test, y_test
 
 
 def train_val_split(x_train, y_train, prop_val=0.1):
@@ -71,7 +139,23 @@ def train_val_split(x_train, y_train, prop_val=0.1):
     y_val: tf.int32 tensor. shape=(N_val,)
         Validation set labels
     '''
-    pass
+    # Total number of samples
+    N = tf.shape(x_train)[0]
+
+    # Number of validation samples
+    n_val = tf.cast(tf.cast(N, tf.float32) * prop_val, tf.int32)
+
+    # Split index
+    split_idx = N - n_val
+
+    # Perform split
+    x_train_new = x_train[:split_idx]
+    y_train_new = y_train[:split_idx]
+
+    x_val = x_train[split_idx:]
+    y_val = y_train[split_idx:]
+
+    return x_train_new, y_train_new, x_val, y_val
 
 
 def preprocess_nonlinear(x, n=4.0):
