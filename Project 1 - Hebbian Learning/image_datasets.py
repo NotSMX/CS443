@@ -58,8 +58,6 @@ def get_dataset(name, norm_method='global', flatten=True, eps=1e-10, verbose=Tru
 
     elif name == 'mnist':
         (x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
-
-        # Add singleton channel dimension: (N, 28, 28) -> (N, 28, 28, 1)
         x_train = tf.expand_dims(x_train, axis=-1)
         x_test  = tf.expand_dims(x_test, axis=-1)
         n_chans = 1
@@ -67,19 +65,14 @@ def get_dataset(name, norm_method='global', flatten=True, eps=1e-10, verbose=Tru
     else:
         raise ValueError(f"Unsupported dataset: {name}")
 
-    # Labels come as (N, 1) for CIFAR-10; ensure (N,)
     y_train = tf.squeeze(y_train)
     y_test  = tf.squeeze(y_test)
 
-    # --------------------------------------------------
-    # Convert to float and scale to [0, 1]
-    # --------------------------------------------------
+
     x_train = tf.cast(x_train, tf.float32) / 255.0
     x_test  = tf.cast(x_test, tf.float32) / 255.0
 
-    # --------------------------------------------------
-    # Global preprocessing (computed on training set)
-    # --------------------------------------------------
+
     if norm_method in ['global', 'center']:
         mean = tf.reduce_mean(x_train, axis=[0, 1, 2])
 
@@ -98,16 +91,10 @@ def get_dataset(name, norm_method='global', flatten=True, eps=1e-10, verbose=Tru
     else:
         raise ValueError(f"Unsupported norm_method: {norm_method}")
 
-    # --------------------------------------------------
-    # Optional flattening
-    # --------------------------------------------------
     if flatten:
         x_train = tf.reshape(x_train, [tf.shape(x_train)[0], -1])
         x_test  = tf.reshape(x_test,  [tf.shape(x_test)[0], -1])
 
-    # --------------------------------------------------
-    # Verbose output
-    # --------------------------------------------------
     if verbose:
         print(f"Dataset: {name}")
         print("x_train:", x_train.shape, x_train.dtype)
@@ -143,16 +130,12 @@ def train_val_split(x_train, y_train, prop_val=0.1):
     y_val: tf.int32 tensor. shape=(N_val,)
         Validation set labels
     '''
-    # Total number of samples
     N = tf.shape(x_train)[0]
 
-    # Number of validation samples
     n_val = tf.cast(tf.cast(N, tf.float32) * prop_val, tf.int32)
 
-    # Split index
     split_idx = N - n_val
 
-    # Perform split
     x_train_new = x_train[:split_idx]
     y_train_new = y_train[:split_idx]
 
@@ -207,25 +190,20 @@ def occlude_images(x, region='top', image_dims=(28, 28, 1)):
     '''
     N, M = x.shape
 
-    # Reshape to 2D
     x_2d = tf.reshape(x, [N, image_dims[0], image_dims[1], image_dims[2]])
 
     half_ind = image_dims[0] // 2
 
     if region == 'top':
-        # Make mask to 0 out the top half of each image
         occlusion_mask = tf.concat([tf.zeros([N, half_ind, image_dims[1], image_dims[2]]),
                                     tf.ones([N, half_ind, image_dims[1], image_dims[2]])], axis=1)
     elif region == 'bottom':
-        # Make mask to 0 out the bottom half of each image
         occlusion_mask = tf.concat([tf.ones([N, half_ind, image_dims[1], image_dims[2]]),
                                     tf.zeros([N, half_ind, image_dims[1], image_dims[2]])], axis=1)
 
-    # Apply the mask: Where mask = 1, keep pixels. Where 0.0, set to min img value
     x_min = tf.reduce_min(x)
     x_occluded = tf.where(tf.cast(occlusion_mask, tf.bool), x_2d, x_min)
 
-    # Flatten occluded images and mask back to (N, M)
     x_flat = tf.reshape(x_occluded, [N, M])
     mask_flat = tf.reshape(occlusion_mask, [N, M])
     return x_flat, mask_flat

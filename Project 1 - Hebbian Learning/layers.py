@@ -199,13 +199,10 @@ class Layer:
         set it to the shape of the layer's activation, represented as a Python list. You can convert something into a
         Python list by calling the `list` function — e.g. `list(blah)`.
         '''
-        # 1. Compute net input
         net_in = self.compute_net_input(x)
 
-        # 2. Compute activation
         net_act = self.compute_net_activation(net_in)
 
-        # 3. Store output shape on first pass
         if self.output_shape is None:
             self.output_shape = list(net_act.shape) 
 
@@ -312,18 +309,15 @@ class Dense(Layer):
         TODO: Set the parameters as instance variables. Call the superclass constructor to handle setting instance vars
         the child has in common with the parent class.
         '''
-        # Call parent constructor first
         super().__init__(layer_name=name, activation=activation, prev_layer_or_block=prev_layer_or_block,
                          do_group_norm=do_group_norm)
 
-        # Dense-specific variables (after parent init)
         if units is None:
             raise ValueError("Dense layer requires 'units' to be specified")
         self.units = int(units)
         self.wt_scale = wt_scale
         self.wt_init = wt_init
 
-        # Initialize weights/bias as None (will be created in init_params)
         self.wts = None
         self.b = None
 
@@ -361,7 +355,6 @@ class Dense(Layer):
         input_dim = int(input_dim)
         units = int(self.units)
 
-        # Initialize weights
         if self.wt_init == 'normal':
             w_init = tf.random.normal(shape=(input_dim, units), stddev=self.wt_scale, dtype=tf.float32)
         elif self.wt_init == 'he':
@@ -373,7 +366,6 @@ class Dense(Layer):
         self.wts = tf.Variable(w_init, trainable=True)
         self.b = tf.Variable(tf.zeros(shape=(units,), dtype=tf.float32), trainable=True)
 
-        # ✅ Set output_shape here based on input batch (B) and number of units
         if len(input_shape) >= 1:
             batch_dim = input_shape[0]
             self.output_shape = [batch_dim, units]
