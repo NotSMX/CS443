@@ -77,6 +77,10 @@ class Layer:
     def get_num_units(self):
         '''Returns the number of units (neurons) in the layer.'''
         return self.units
+   
+    def set_activation_function(self, act_fun_str):
+        '''Sets the activation function to the string `act_fun_str`.'''
+        self.act_fun_name = act_fun_str
 
     def set_tanh_beta(self, beta):
         '''Sets the β hyperparameter in the tanh activation function to the value `beta`.

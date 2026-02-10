@@ -40,8 +40,12 @@ def get_dataset(name, norm_method='global', flatten=True, eps=1e-10, verbose=Tru
 
     NOTE:
     1. You should rely on the TensorFlow Keras built-in datasets module to acquire the datasets.
-    2. Min-max normalize the images features to floats between 0-1 before performing any addition preprocessing.
-    3. This function (and the file more generally) should be written in TensorFlow. You should not import NumPy.
+    2. Work in NumPy to min-max normalize the images features to floats between 0-1 and then perform any additional
+    preprocessing.
+    3. Remember to cast the data to TensorFlow tensors of the appropriate data types before returning.
+    4. When normalizing, you want to use the stats from the training set to normalize the test set
+    (otherwise the exact same feature values would get mapped differently between the train and test sets, which is not
+    good).
     '''
     name = name.lower()
 
