@@ -1,6 +1,6 @@
 '''hebb_net.py
 Bio-inspired neural network that implements the Hebbian learning rule and competition among neurons in the network
-YOUR NAMES HERE
+Daniel Yu & Jordan Wang
 CS 443: Bio-Inspired Machine Learning
 Project 1: Hebbian Learning
 '''
@@ -54,11 +54,23 @@ class HebbNet:
             self.wts = tf.constant(np.load(saved_wts_path))
             print('Loaded stored wts.')
         else:
-            # TODO: Initialize the weights
-            pass
+            self.wts = tf.random.normal(
+                shape=(num_features, num_neurons),
+                mean=0.0,
+                stddev=1.0,
+                dtype=tf.float32
+            )
+
+        # Store parameters
+        self.num_features = num_features
+        self.num_neurons = num_neurons
+        self.k = k
+        self.inhib_value = inhib_value
+        self.saved_wts_path = saved_wts_path
+
     def get_wts(self):
         '''Returns the Hebbian network wts'''
-        pass
+        return self.wts.numpy()
 
     def set_wts(self, wts):
         '''Replaces the Hebbian network weights with `wts` passed in as a parameter.
@@ -68,7 +80,7 @@ class HebbNet:
         wts: tf.float32 tensor. shape=(M, H).
             New Hebbian network weights.
         '''
-        pass
+        self.wts = tf.constant(wts, dtype=tf.float32)
 
     def net_in(self, x):
         '''Computes the Hebbian network Dense net_in based on the data `x`.
@@ -82,8 +94,9 @@ class HebbNet:
         tf.float32 tensor. shape=(B, H).
             netIn
         '''
-        pass
-
+        x = tf.convert_to_tensor(x, dtype=tf.float32)
+        return tf.matmul(x, self.wts)
+    
     def net_act(self, net_in):
         '''Compute the Hebbian network activation, which is a function that reflects competition among the neurons
         based on their net_in values.
@@ -110,7 +123,26 @@ class HebbNet:
         arange indexing.
         - += is a valid TensorFlow operator.
         '''
-        pass
+        B = tf.shape(net_in)[0]
+        H = tf.shape(net_in)[1]
+
+        # Find winner (argmax)
+        winner_idx = tf.argmax(net_in, axis=1)
+
+        # Find kth largest using top_k
+        top_k = tf.math.top_k(net_in, k=self.k)
+        kth_values = top_k.values[:, -1]  # kth highest value
+
+        # Create masks
+        winner_mask = tf.one_hot(winner_idx, depth=H)
+
+        kth_mask = tf.cast(tf.equal(net_in, tf.expand_dims(kth_values, axis=1)), tf.float32)
+
+        # net_act initialization
+        net_act = winner_mask * 1.0
+        net_act += kth_mask * self.inhib_value
+
+        return net_act
 
     def update_wts(self, x, net_in, net_act, lr, eps=1e-10):
         '''Update the Hebbian network wts according to a modified Hebbian learning rule (competitive Oja's rule).
@@ -130,7 +162,23 @@ class HebbNet:
         appropriate operation (elementwise multiplication vs matrix multiplication).
         - The `keepdims` keyword argument may be convenient here.
         '''
-        pass
+        x = tf.convert_to_tensor(x, dtype=tf.float32)
+
+        # Hebbian term
+        hebb = tf.matmul(tf.transpose(x), net_act)
+
+        # Oja normalization term
+        net_act_sq = tf.square(net_act)
+        oja_term = self.wts * tf.reduce_sum(net_act_sq, axis=0, keepdims=True)
+
+        delta_w = hebb - oja_term
+
+        # Normalize gradients
+        max_abs = tf.reduce_max(tf.abs(delta_w))
+        delta_w = delta_w / (max_abs + eps)
+
+        # Update weights
+        self.wts = self.wts + lr * delta_w
 
     def fit(self, x, epochs=1, mini_batch_sz=500, lr=1e-2, plot_wts_live=False, fig_sz=(9, 9), n_wts_plotted=(10, 10),
             print_every=1, save_wts=True, ds_feat_shape=(32, 32, 3)):
@@ -177,16 +225,37 @@ class HebbNet:
         if plot_wts_live:
             fig = plt.figure(figsize=fig_sz)
 
-        # This is done every print_every epochs
-        if plot_wts_live:
-            draw_grid_image(tf.transpose(self.wts), n_wts_plotted[0], n_wts_plotted[1],
+        for e in range(1, epochs + 1):
+
+                # Shuffle each epoch
+                idx = tf.random.shuffle(tf.range(N))
+                x_shuffled = tf.gather(x, idx)
+
+                for i in range(0, N, mini_batch_sz):
+                    batch = x_shuffled[i:i + mini_batch_sz]
+
+                    net_in = self.net_in(batch)
+                    net_act = self.net_act(net_in)
+                    self.update_wts(batch, net_in, net_act, lr)
+
+                if e % print_every == 0:
+
+                    if plot_wts_live:
+                        draw_grid_image(
+                            tf.transpose(self.wts),
+                            n_wts_plotted[0],
+                            n_wts_plotted[1],
                             title=f'Net receptive fields (Epoch {e})',
-                            sample_dims=ds_feat_shape)
-            display.clear_output(wait=True)
-            display.display(fig)
-            time.sleep(0.001)
-        else:
-            print(f'Starting epoch {e}/{epochs}')
+                            sample_dims=ds_feat_shape
+                        )
+                        display.clear_output(wait=True)
+                        display.display(fig)
+                        time.sleep(0.001)
+                    else:
+                        print(f'Epoch {e}/{epochs}')
+                        print(f'Min wt: {tf.reduce_min(self.wts).numpy():.4f}, '
+                            f'Max wt: {tf.reduce_max(self.wts).numpy():.4f}')
+
 
         # This happens at the end
         if save_wts:
