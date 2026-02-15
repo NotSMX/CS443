@@ -168,8 +168,7 @@ class HebbNet:
         hebb = tf.matmul(tf.transpose(x), net_act)
 
         # Oja normalization term
-        net_act_sq = tf.square(net_act)
-        oja_term = self.wts * tf.reduce_sum(net_act_sq, axis=0, keepdims=True)
+        oja_term = self.wts * tf.reduce_sum(net_in * net_act, axis=0, keepdims=True)
 
         delta_w = hebb - oja_term
 
