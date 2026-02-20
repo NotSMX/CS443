@@ -410,56 +410,90 @@ class DeepNetwork:
         train_loss_hist = []
         val_loss_hist = []
         val_acc_hist = []
+        recent_val_losses_lr = []  # rolling list for learning rate decay
+        num_lr_decays = 0
 
         self.set_layer_training_mode(is_training=True)
         
         rng = np.random.RandomState(0)
         N = len(x)
-        
-        # training loop
+        recent_val_losses = []
+        num_lr_decays = 0
+
         for e in range(max_epochs):
             epoch_start_time = time.time()
-            
-            # mini-batches for this epoch
-            num_batches = N // batch_size
-            if N % batch_size != 0:
-                num_batches += 1
-            
+
+            # Mini-batches
+            num_batches = N // batch_size + int(N % batch_size != 0)
             epoch_train_losses = []
-            
-            for b in range(num_batches):
+
+            for _ in range(num_batches):
                 batch_indices = rng.randint(0, N, size=batch_size)
-                # change the NumPy indices to TensorFlow since they must be consistent
                 batch_indices = tf.constant(batch_indices)
                 x_batch = tf.gather(x, batch_indices)
                 y_batch = tf.gather(y, batch_indices)
                 
                 batch_loss = self.train_step(x_batch, y_batch)
-                epoch_train_losses.append(batch_loss.numpy())
-            
-            # training loss for this epoch
+                epoch_train_losses.append(float(batch_loss.numpy()))
+
             avg_train_loss = np.mean(epoch_train_losses)
             train_loss_hist.append(avg_train_loss)
-            
-            # computing the validation accuracy and loss
-            if (e + 1) % val_every == 0 and x_val is not None:
+
+            # Validation check
+            if x_val is not None and (e + 1) % val_every == 0:
                 val_acc, val_loss = self.evaluate(x_val, y_val)
-                val_acc_hist.append(val_acc.numpy())
-                val_loss_hist.append(val_loss.numpy())
-                
+                val_acc_hist.append(float(val_acc.numpy()))
+                val_loss_hist.append(float(val_loss.numpy()))
+
+                # Update recent validation losses (float-only)
+                recent_val_losses, stop = self.early_stopping(recent_val_losses, float(val_loss.numpy()), patience)
+
+                # -------------------------
+                # Learning rate decay logic
+                # -------------------------
+                if num_lr_decays < lr_max_decays:
+                    # Append current val loss for LR decay
+                    recent_val_losses_lr.append(float(val_loss.numpy()))
+                    
+                    # Keep at most lr_patience + 1 elements
+                    if len(recent_val_losses_lr) > lr_patience + 1:
+                        recent_val_losses_lr.pop(0)
+                    
+                    # Only decay if rolling window is full
+                    if len(recent_val_losses_lr) == lr_patience + 1:
+                        oldest = recent_val_losses_lr[0]
+                        if oldest <= min(recent_val_losses_lr[1:]):
+                            # Decay learning rate
+                            self.lr_step_decay(lr_decay_rate=lr_decay_factor)
+                            num_lr_decays += 1
+                            # Clear the rolling window so we wait for the next patience cycle
+                            recent_val_losses_lr = []
+                            
                 if verbose:
-                    print(f'Epoch {e}/{max_epochs-1}, Training loss {avg_train_loss:.3f}, Val loss {val_loss.numpy():.3f}, Val acc {val_acc.numpy():.4f}')
+                    print(f'Epoch {e}/{max_epochs-1}, Training loss {avg_train_loss:.6f}, '
+                        f'Val loss {float(val_loss.numpy()):.6f}, Val acc {float(val_acc.numpy()):.4f}')
                 
+                # Check early stopping
+                if stop:
+                    if verbose:
+                        print(f"Stopping early at epoch {e}")
+                    break
+
+                # Optional: learning rate decay (placeholder)
+                # if len(recent_val_losses) >= lr_patience:
+                #     # Add your lr_step_decay logic here
+                #     pass
+
                 self.set_layer_training_mode(is_training=True)
-            
+
             epoch_time = time.time() - epoch_start_time
             if verbose:
                 print(f'Epoch {e} took: {epoch_time:.1f} secs')
-        
+
         if verbose:
-            print(f'Finished training after {max_epochs} epochs!')
-        
-        return train_loss_hist, val_loss_hist, val_acc_hist, max_epochs
+            print(f'Finished training after {e+1} epochs!')
+
+        return train_loss_hist, val_loss_hist, val_acc_hist, e+1
 
     def evaluate(self, x, y, batch_sz=64):
         '''Evaluates the accuracy and loss on the data `x` and labels `y`. Breaks the dataset into mini-batches for you
@@ -494,7 +528,7 @@ class DeepNetwork:
         if batch_sz > N:
             batch_sz = N
 
-        num_batches = N // batch_sz
+        num_batches = N // batch_sz + int(N % batch_sz != 0)
 
         # Make sure the mini-batch size is positive...
         if num_batches < 1:
@@ -559,7 +593,22 @@ class DeepNetwork:
         - It may be helpful to think of `recent_val_losses` as a queue: the current loss value always gets inserted
         either at the beginning or end. The oldest value is then always on the other end of the list.
         '''
-        pass
+        # Append current val loss
+        recent_val_losses.append(float(curr_val_loss))
+
+        # Keep at most patience+1 elements (rolling window)
+        if len(recent_val_losses) > patience + 1:
+            recent_val_losses.pop(0)  # remove oldest
+
+        stop = False
+        if len(recent_val_losses) == patience + 1:
+            # oldest loss is at index 0
+            oldest = recent_val_losses[0]
+            # compare to the other patience losses
+            if oldest <= min(recent_val_losses[1:]):
+                stop = True
+
+        return recent_val_losses, stop
 
     def lr_step_decay(self, lr_decay_rate):
         '''Adjusts the learning rate used by the optimizer to be a proportion `lr_decay_rate` of the current learning
@@ -581,4 +630,13 @@ class DeepNetwork:
         1. Update the optimizer's learning rate.
         2. Always print out the optimizer's learning rate before and after the change.
         '''
-        pass
+        # Get current learning rate
+        old_lr = self.opt.learning_rate
+
+        print(f"Learning rate before decay: {old_lr}")
+
+        # Update learning rate
+        new_lr = old_lr * lr_decay_rate
+        self.opt.learning_rate = new_lr
+
+        print(f"Learning rate after decay: {self.opt.learning_rate}")

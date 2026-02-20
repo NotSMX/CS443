@@ -86,7 +86,22 @@ class NonlinearDecoder(network.DeepNetwork):
         2. The output layer for ANY `DeepNetwork` here and going forward should be assigned to the variable
         self.output_layer.
         '''
-        pass
+        # Initialize parent class
+        super().__init__()
+
+        # Store hyperparameters
+        self.beta = beta
+        self.loss_exp = loss_exp
+
+        # Create dense output layer
+        self.output_layer = tf.keras.layers.Dense(
+            units=C,
+            input_shape=input_feats_shape,
+            activation=None,  # we'll apply tanh manually (to include beta)
+            kernel_initializer=tf.keras.initializers.RandomNormal(stddev=wt_scale),
+            bias_initializer='zeros'
+        )
+
 
     def __call__(self, x):
         '''Do a forward pass thru the network with mini-batch `x`.
@@ -101,4 +116,10 @@ class NonlinearDecoder(network.DeepNetwork):
         tf.float32 tensor. shape=(B, M).
             The output layer activation computed on the current mini-batch.
         '''
-        pass
+        # Linear transform
+        z = self.output_layer(x)
+
+        # Apply beta-scaled tanh activation
+        output = tf.math.tanh(self.beta * z)
+
+        return output
