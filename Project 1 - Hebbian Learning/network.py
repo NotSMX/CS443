@@ -27,6 +27,7 @@ class DeepNetwork:
 
         # Keep these instance vars:
         self.loss_name = None
+        self.loss_exp = 2.0  # Default exponent for lp loss
         self.output_layer = None
         self.all_net_params = []
 
@@ -229,16 +230,30 @@ class DeepNetwork:
         function in tf_util.py that offers functionality that is similar to arange indexing in NumPy (which you cannot
         do in TensorFlow). Use it!
         '''
-        if self.loss_name != 'cross_entropy':
+        if self.loss_name == 'cross_entropy':
+            y = tf.cast(y, tf.int32)
+            
+            # getting the predicted probabilities
+            p_true = arange_index(out_net_act, y)
+            
+            # computing the cross-entropy loss
+            return -tf.reduce_mean(tf.math.log(p_true + eps))
+        
+        elif self.loss_name == 'lp':
+            # LP loss for nonlinear decoder
+            # Create one-hot encoding with -1 for "off" values and 1 for "on" values
+            C = out_net_act.shape[-1]
+            y_one_hot = 2 * tf.one_hot(y, C) - 1  # Maps 0→-1, 1→1
+            
+            # Compute |yh - netAct|^m
+            diff = tf.abs(y_one_hot - out_net_act)
+            loss_val = tf.pow(diff, self.loss_exp)
+            
+            # Return mean loss
+            return tf.reduce_mean(loss_val)
+        
+        else:
             raise ValueError(f"Unsupported loss: {self.loss_name}")
-
-        y = tf.cast(y, tf.int32)
-        
-        # getting the predicted probabilities
-        p_true = arange_index(out_net_act, y)
-        
-        # computing the cross-entropy loss
-        return -tf.reduce_mean(tf.math.log(p_true + eps))
 
 
     def update_params(self, tape, loss):

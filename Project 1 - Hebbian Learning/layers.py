@@ -40,6 +40,9 @@ class Layer:
         # bool cannot be updated during training when using @tf.function
         self.is_training = tf.Variable(False, trainable=False)
 
+        # Tanh beta parameter for scaled tanh activation
+        self.tanh_beta = 1.0
+
         # The following relates to features you will implement later in the semester. Ignore for now.
         self.num_groups = None
         self.gn_gain = None
@@ -88,7 +91,7 @@ class Layer:
         (Week 3)
         NOTE: Ignore until instructed otherwise.
         '''
-        pass
+        self.tanh_beta = beta
 
     def set_num_groups(self, groups):
         '''Sets the number of normalization groups to use within the layer for group normalization.
@@ -166,10 +169,12 @@ class Layer:
         '''
         if self.act_fun_name  == 'relu':
             return tf.nn.relu(net_in)
-        elif self.act_fun_name == 'linear':
+        elif self.act_fun_name == 'linear' or self.act_fun_name is None:
             return net_in
         elif self.act_fun_name == 'softmax':
             return tf.nn.softmax(net_in, axis=-1)
+        elif self.act_fun_name == 'tanh':
+            return tf.math.tanh(self.tanh_beta * net_in)
         else:
             raise ValueError(f"Unsupported activation function: {self.act_fun_name}")
 
@@ -363,8 +368,8 @@ class Dense(Layer):
         else:
             raise ValueError(f"Unknown wt_init method: {self.wt_init}")
 
-        self.wts = tf.Variable(w_init, trainable=True)
-        self.b = tf.Variable(tf.zeros(shape=(units,), dtype=tf.float32), trainable=True)
+        self.wts = tf.Variable(w_init, trainable=True, name='wts')
+        self.b = tf.Variable(tf.zeros(shape=(units,), dtype=tf.float32), trainable=True, name='bias')
 
         if len(input_shape) >= 1:
             batch_dim = input_shape[0]
