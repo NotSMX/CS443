@@ -617,10 +617,11 @@ class DeepNetwork:
 
         stop = False
         if len(recent_val_losses) == patience + 1:
-            # oldest loss is at index 0
+            # The oldest loss is at index 0, most recent at index -1
             oldest = recent_val_losses[0]
-            # compare to the other patience losses
-            if oldest <= min(recent_val_losses[1:]):
+            # Check if all the more recent losses (indices 1 to patience) are >= oldest
+            # In other words, stop if oldest is the minimum
+            if all(oldest <= loss for loss in recent_val_losses[1:]):
                 stop = True
 
         return recent_val_losses, stop
