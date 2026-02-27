@@ -162,7 +162,7 @@ def preprocess_nonlinear(x, n=4.0):
     tf.float32 tensor. shape=(N, M).
         Data transformed by ReLU raised to the `n` power.
     '''
-    pass
+    return tf.pow(tf.nn.relu(x), n)
 
 
 def occlude_images(x, region='top', image_dims=(28, 28, 1)):
