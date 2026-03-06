@@ -1,6 +1,6 @@
 '''dense_pcn.py
 Densely connected predictive coding network (PCN)
-YOUR NAMES HERE
+Daniel Yu & Jordan Wang
 CS 443: Bio-Inspired Learning
 '''
 import time
@@ -50,7 +50,35 @@ class DensePCN(network.DeepNetwork):
         to make sure your network works with your existing `DeepNetwork` and `Layer` code.
         4. Create instance variables for parameters as needed.
         '''
+        # Call superclass constructor
+        super().__init__(input_feats_shape=input_feats_shape)
+
+        self.train_num_steps = train_num_steps
+        self.test_num_steps = test_num_steps
+        self.gamma_lr = gamma_lr
+
         self.layers = []
+
+        # Build input layer
+        input_layer = InputPCNLayer('InputLayer', units=input_feats_shape[0], gamma_lr=gamma_lr)
+        self.layers.append(input_layer)
+
+        # Build hidden layers
+        prev_layer = input_layer
+        for i, h_units in enumerate(hidden_units):
+            hidden_layer = DensePCNLayer(f'PredLayer_{i}', units=h_units, wt_scale=wt_scale,
+                                         prev_layer_or_block=prev_layer, gamma_lr=gamma_lr)
+            self.layers.append(hidden_layer)
+            prev_layer.set_next_layer(hidden_layer)
+            prev_layer = hidden_layer
+
+        # Build output layer
+        output_layer = OutputPCNLayer('OutputLayer', units=C, wt_scale=wt_scale,
+                                      prev_layer_or_block=prev_layer, gamma_lr=gamma_lr)
+        self.layers.append(output_layer)
+        prev_layer.set_next_layer(output_layer)
+
+        self.output_layer = output_layer
 
     def set_test_num_steps(self, num_steps):
         '''Set method to update the number of steps/iterations/sweeps used by the PCN during inference.
@@ -60,7 +88,7 @@ class DensePCN(network.DeepNetwork):
         num_steps: int.
             Number of steps/iterations/sweeps to use by the PCN during inference.
         '''
-        pass
+        self.test_num_steps = num_steps
 
     def __call__(self, x):
         '''Perform the forward pass through the network.
@@ -75,7 +103,17 @@ class DensePCN(network.DeepNetwork):
         tf.float32 tensor. shape=(B, C).
             netAct produced by the output layer.
         '''
-        pass
+        # Reset all layer states for new batch
+        B = x.shape[0]
+        for layer in self.layers:
+            layer.reset_state(B)
+
+        # Forward pass through all layers
+        curr_input = x
+        for layer in self.layers:
+            curr_input = layer(curr_input)
+
+        return curr_input
 
     def update_states(self, num_steps, x_batch, y_batch=None):
         '''Performs `num_steps` forward sweeps through the network to update the state in each successive layer.
@@ -100,6 +138,29 @@ class DensePCN(network.DeepNetwork):
         '''
         B, M = x_batch.shape
 
+        # 1. Forward pass to initialize all layer states (also resets states internally)
+        self(x_batch)
+
+        # 2. Configure output layer clamping
+        if y_batch is not None:
+            # Training: clamp output layer to one-hot labels
+            C = self.output_layer.get_num_units()
+            one_hot_labels = tf.one_hot(y_batch, C)
+            self.output_layer.set_state(one_hot_labels)
+            self.output_layer.clamp_state()
+        else:
+            # Inference: unclamp output layer so state can evolve
+            self.output_layer.unclamp_state()
+
+        # Always clamp input layer to the current mini-batch data
+        self.layers[0].set_state(x_batch)
+        self.layers[0].clamp_state()
+
+        # 3. Iteratively update each layer's state sequentially input → output
+        for _ in range(num_steps):
+            for layer in self.layers:
+                layer.update_state()
+
     def loss(self):
         '''Computes the loss for the current minibatch based on the states store in each network layer.
 
@@ -114,7 +175,14 @@ class DensePCN(network.DeepNetwork):
         2. Throw an error if the the user specified loss is not supported.
         '''
         if self.loss_name == 'predictive':
-            pass
+            total_loss = 0.0
+            # Sum over all non-input layers
+            for layer in self.layers[1:]:
+                pred_error = layer.prediction_error()  # shape (B, M_prev)
+                # Sum of squares over neurons, average over samples, times 0.5
+                layer_loss = tf.reduce_mean(tf.reduce_sum(0.5 * pred_error ** 2, axis=1))
+                total_loss += layer_loss
+            return total_loss
         else:
             raise ValueError(f'Unknown loss function {self.loss_name}')
 
@@ -129,7 +197,13 @@ class DensePCN(network.DeepNetwork):
         float.
             The loss.
         '''
-        pass
+        self.set_layer_training_mode(is_training=True)
+        with tf.GradientTape() as tape:
+            self.update_states(num_steps=self.train_num_steps, x_batch=x_batch, y_batch=y_batch)
+            loss = self.loss()
+
+        self.update_params(tape, loss)
+        return loss
 
     def test_step(self, x_batch, y_batch, num_steps):
         '''Completely process a single mini-batch of data during test/validation time. This should mirror your version
@@ -159,7 +233,15 @@ class DensePCN(network.DeepNetwork):
         I suggest making sure the predicted classes are cast to tf.int32 before calling accuracy. This should make
         the dtype of the predicted classes the same as in the previous project.
         '''
-        pass
+        self.update_states(num_steps=num_steps, x_batch=x_batch, y_batch=None)
+        loss = self.loss()
+
+        # Predicted class = output neuron with largest state value
+        output_states = self.output_layer.get_state()
+        y_pred = tf.cast(tf.argmax(output_states, axis=1), dtype=tf.int32)
+
+        acc = self.accuracy(y_batch, y_pred)
+        return acc, loss
 
     def evaluate(self, x, y, batch_sz=64):
         '''Evaluates the accuracy and loss on the data `x` and labels `y`. Breaks the dataset into mini-batches for you
