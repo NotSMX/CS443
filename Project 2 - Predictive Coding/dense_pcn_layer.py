@@ -54,6 +54,7 @@ class PCNLayer(Dense):
 
         self.gamma_lr = gamma_lr
         self.next_layer = next_layer_or_block
+        self.max_state_abs = 50.0
         # Keep the following
         self.is_clamped = tf.Variable(False, trainable=False)  # Is the state protected from evolving from feedback?
         # Medium term memory / state of the layer's activations shaped by the prediction errors
@@ -104,6 +105,9 @@ class PCNLayer(Dense):
     def set_state(self, state):
         '''Assigns the new state `state` as the layer's evolving state, replacing anyone that previously exists.'''
         self.state = state
+
+    def clip_state(self):
+        self.state = tf.clip_by_value(self.state, -self.max_state_abs, self.max_state_abs)
 
     def clamp_state(self):
         '''Modify the `is_clamped` instance variable to indicate that the state is now clamped (i.e. cant be modified).
@@ -350,6 +354,7 @@ class DensePCNLayer(PCNLayer):
         d_TD = self.state - self.next_layer.predict_input()  # (B, H)
 
         self.state = self.state - self.gamma_lr * (d_BU + d_TD)
+        self.clip_state()
 
 
 class OutputPCNLayer(DensePCNLayer):
@@ -401,3 +406,4 @@ class OutputPCNLayer(DensePCNLayer):
             # wts shape: (M, H), pred_error shape: (B, M) → d_BU shape: (B, H)
             d_BU = -(pred_error @ self.wts)
             self.state = self.state - self.gamma_lr * d_BU
+            self.clip_state()
