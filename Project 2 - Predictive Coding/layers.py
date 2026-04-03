@@ -98,7 +98,7 @@ class Layer:
 
         (Ignore until later in the semester)
         '''
-        pass
+        self.num_groups = int(groups)
 
     def get_mode(self):
         '''Returns whether the Layer is in a training state.
@@ -206,6 +206,9 @@ class Layer:
         '''
         net_in = self.compute_net_input(x)
 
+        if self.do_group_norm and self.gn_gain is not None:
+            net_in = self.compute_group_norm(net_in)
+
         net_act = self.compute_net_activation(net_in)
 
         if self.output_shape is None:
@@ -243,7 +246,9 @@ class Layer:
         float.
             The Kaiming gain.
         '''
-        pass
+        if self.act_fun_name == 'relu':
+            return tf.sqrt(2.0)
+        return 1.0
 
     def is_doing_groupnorm(self):
         '''Returns whether the current layer is using group normalization.
@@ -255,14 +260,14 @@ class Layer:
         bool.
             True if the layer has batch normalization turned on, False otherwise.
         '''
-        pass
+        return self.do_group_norm
 
     def compute_group_norm(self, net_in, eps=0.001):
         '''Computes the group normalization based on on the net input `net_in`.
 
         Leave this parent method empty — subclasses should implement this.
         '''
-        pass
+        return net_in
 
     def init_groupnorm_params(self):
         '''Initializes the parameters for group normalization if group normalization is enabled.
@@ -280,6 +285,15 @@ class Layer:
         '''
         if not self.do_group_norm:
             return
+
+        if self.units is None:
+            return
+
+        self.gn_gain = tf.Variable(tf.ones((self.units,), dtype=tf.float32), trainable=True, name='gn_gain')
+        self.gn_bias = tf.Variable(tf.zeros((self.units,), dtype=tf.float32), trainable=True, name='gn_bias')
+
+        if self.b is not None:
+            self.b = tf.Variable(0.0, trainable=False, dtype=tf.float32, name='bias')
 
 
 class Dense(Layer):
@@ -425,7 +439,28 @@ class Dense(Layer):
         tf.float32 tensor. shape=(B, M).
             The normalized tensor with the same shape as the input tensor.
         '''
-        B, H = net_in.shape
+        _, H = net_in.shape
+
+        if self.num_groups is None:
+            groups = max(1, int(round(H / 8)))
+        else:
+            groups = int(self.num_groups)
+
+        groups = min(groups, int(H))
+        while groups > 1 and (H % groups) != 0:
+            groups -= 1
+
+        group_size = H // groups
+        x_group = tf.reshape(net_in, [-1, groups, group_size])
+        mean = tf.reduce_mean(x_group, axis=2, keepdims=True)
+        var = tf.reduce_mean(tf.square(x_group - mean), axis=2, keepdims=True)
+        x_norm = (x_group - mean) / tf.sqrt(var + eps)
+        x_norm = tf.reshape(x_norm, [-1, H])
+
+        if self.gn_gain is not None and self.gn_bias is not None:
+            x_norm = x_norm * self.gn_gain + self.gn_bias
+
+        return x_norm
 
     def __str__(self):
         '''This layer's "ToString" method. Feel free to customize if you want to make the layer description fancy,

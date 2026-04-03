@@ -56,7 +56,27 @@ class ConvPCNBlock(block.Block):
         2. Build out and configure layers that belong to the block and add them to the self.layers list.
         3. Create instance variables for other parameters as needed.
         '''
-        self.layers = []
+        block.Block.__init__(self, blockname=blockname, prev_layer_or_block=prev_layer_or_block)
+
+        self.units = units
+        self.kernel_size = kernel_size
+        self.strides = strides
+        self.num_steps = num_steps
+        self.state_lr = state_lr
+        self.dropout_rate = dropout_rate
+
+        conv = Conv2D(name=f'{blockname}_Conv2D', units=units, kernel_size=kernel_size, strides=strides,
+                      activation='relu', wt_scale=1e-3, prev_layer_or_block=prev_layer_or_block,
+                      wt_init=wt_init, do_group_norm=do_group_norm)
+        convt = Conv2DTranspose(name=f'{blockname}_Conv2DTranspose', kernel_size=kernel_size, strides=strides,
+                                activation='relu', wt_scale=1e-3, prev_layer_or_block=conv,
+                                wt_init=wt_init, do_group_norm=do_group_norm)
+
+        self.layers = [conv, convt]
+
+        if dropout_rate is not None:
+            drop = Dropout(name=f'{blockname}_Dropout', rate=dropout_rate, prev_layer_or_block=convt)
+            self.layers.append(drop)
 
     def __call__(self, x):
         '''Forward pass through the ConvPCNBlock.
@@ -81,4 +101,19 @@ class ConvPCNBlock(block.Block):
         5. Repeat steps 2-4 for the preset number of steps.
         6. Apply the dropout (if we are doing).
         '''
-        pass
+        conv = self.layers[0]
+        convt = self.layers[1]
+
+        state = conv(x)
+        units_prev = int(x.shape[-1])
+
+        for _ in range(self.num_steps):
+            x_pred = convt(state, units_prev=units_prev)
+            pred_err = tf.nn.relu(x - x_pred)
+            forwarded_err = conv(pred_err)
+            state = state + self.state_lr * forwarded_err
+
+        if self.dropout_rate is not None:
+            state = self.layers[-1](state)
+
+        return state

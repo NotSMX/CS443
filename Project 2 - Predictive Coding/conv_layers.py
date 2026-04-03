@@ -148,7 +148,28 @@ class Conv2D(layers.Layer):
         tf.float32 tensor. shape=(B, Iy, Ix, K).
             The normalized tensor with the same shape as the input tensor.
         '''
-        B, Iy, Ix, K = net_in.shape
+        _, Iy, Ix, K = net_in.shape
+
+        if self.num_groups is None:
+            groups = max(1, int(round(K / 8)))
+        else:
+            groups = int(self.num_groups)
+
+        groups = min(groups, int(K))
+        while groups > 1 and (K % groups) != 0:
+            groups -= 1
+
+        group_size = K // groups
+        x_group = tf.reshape(net_in, [-1, Iy, Ix, groups, group_size])
+        mean = tf.reduce_mean(x_group, axis=[1, 2, 4], keepdims=True)
+        var = tf.reduce_mean(tf.square(x_group - mean), axis=[1, 2, 4], keepdims=True)
+        x_norm = (x_group - mean) / tf.sqrt(var + eps)
+        x_norm = tf.reshape(x_norm, [-1, Iy, Ix, K])
+
+        if self.gn_gain is not None and self.gn_bias is not None:
+            x_norm = x_norm * tf.reshape(self.gn_gain, [1, 1, 1, K]) + tf.reshape(self.gn_bias, [1, 1, 1, K])
+
+        return x_norm
 
 
     def __str__(self):
