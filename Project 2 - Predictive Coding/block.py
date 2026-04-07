@@ -3,8 +3,6 @@ Defines the parent Block class
 Oliver W. Layton
 CS 443: Bio-Inspired Machine Learning
 '''
-
-
 class Block:
     '''The `Block` parent class and specifies functionality shared by all blocks. All blocks inherit from this class.'''
     def __init__(self, blockname, prev_layer_or_block):

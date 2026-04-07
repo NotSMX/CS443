@@ -1,6 +1,6 @@
 '''conv_pcn.py
 Convolutional predictive coding neural network.
-YOUR NAMES HERE
+DANIEL YU & JORDAN WANG
 CS 443: Bio-Inspired Learning
 '''
 import network
@@ -43,7 +43,9 @@ class ConvPCN(network.DeepNetwork):
         Hint: Although there is feedback, it is totally enclosed within each ConvPCNBlock. This means
         layers and blocks are sequentially connected like in a conventional neural network, which is convenient ;)
         '''
-        pass
+        for layer in self.layers:
+            x = layer(x)
+        return x
 
 
 class ConvPCN6Mini(ConvPCN):
@@ -98,8 +100,46 @@ class ConvPCN6Mini(ConvPCN):
         - Make sure your output layer is assigned to self.output_layer.
         '''
         super().__init__(input_feats_shape)
-
         self.layers = []
+
+        prev = None
+        conv0 = Conv2D('Conv2D', units=conv_units, kernel_size=(3,3), strides=1,
+                    activation='relu', wt_init=wt_init, do_group_norm=do_group_norm,
+                    prev_layer_or_block=prev)
+        self.layers.append(conv0)
+        prev = conv0
+
+        for i, units in enumerate(pcn_units):
+            block = ConvPCNBlock(f'PCNBlock_{i}', units=units, kernel_size=(3,3), strides=1,
+                                num_steps=num_steps, state_lr=step_lr, dropout_rate=None,
+                                wt_init=wt_init, do_group_norm=do_group_norm,
+                                prev_layer_or_block=prev)
+            self.layers.append(block)
+            prev = block
+
+            if maxpool_after_pcn_block[i]:
+                pool = MaxPool2D(f'Maxpool2D_{i}', pool_size=(2,2), strides=2, prev_layer_or_block=prev)
+                self.layers.append(pool)
+                prev = pool
+
+        if dropout_rate is not None:
+            drop = Dropout('Dropout', rate=dropout_rate, prev_layer_or_block=prev)
+            self.layers.append(drop)
+            prev = drop
+
+        flatten = Flatten('Flatten', prev_layer_or_block=prev)
+        self.layers.append(flatten)
+        prev = flatten
+
+        dense_hidden = Dense('Dense_Hidden', units=dense_units, activation='relu',
+                            wt_init=wt_init, do_group_norm=do_group_norm, prev_layer_or_block=prev)
+        self.layers.append(dense_hidden)
+        prev = dense_hidden
+
+        output_layer = Dense('Output', units=C, activation='softmax',
+                            wt_init=wt_init, prev_layer_or_block=prev)
+        self.layers.append(output_layer)
+        self.output_layer = output_layer
 
 
 
@@ -155,5 +195,43 @@ class ConvPCN7XL(ConvPCN):
         - Make sure your output layer is assigned to self.output_layer.
         '''
         super().__init__(input_feats_shape)
-
         self.layers = []
+
+        prev = None
+        conv0 = Conv2D('Conv2D_0', units=conv_units, kernel_size=(3,3), strides=1,
+                    activation='relu', wt_init=wt_init, do_group_norm=do_group_norm,
+                    prev_layer_or_block=prev)
+        self.layers.append(conv0)
+        prev = conv0
+
+        for i, units in enumerate(pcn_units):
+            block = ConvPCNBlock(f'PCNBlock_{i}', units=units, kernel_size=(3,3), strides=1,
+                                num_steps=num_steps, state_lr=step_alpha, dropout_rate=dropout_rate,
+                                wt_init=wt_init, do_group_norm=do_group_norm,
+                                prev_layer_or_block=prev)
+            self.layers.append(block)
+            prev = block
+
+            if maxpool_in_pcn_block[i]:
+                pool = MaxPool2D(f'Maxpool2D_{i}', pool_size=(2,2), strides=2, prev_layer_or_block=prev)
+                self.layers.append(pool)
+                prev = pool
+
+        flatten = Flatten('Flatten', prev_layer_or_block=prev)
+        self.layers.append(flatten)
+        prev = flatten
+
+        if dropout_rate is not None:
+            drop = Dropout('Dropout', rate=dropout_rate, prev_layer_or_block=prev)
+            self.layers.append(drop)
+            prev = drop
+
+        dense_hidden = Dense('Dense_hidden', units=dense_units, activation='relu',
+                            wt_init=wt_init, do_group_norm=do_group_norm, prev_layer_or_block=prev)
+        self.layers.append(dense_hidden)
+        prev = dense_hidden
+
+        output_layer = Dense('Dense_output', units=C, activation='softmax',
+                            wt_init=wt_init, prev_layer_or_block=prev)
+        self.layers.append(output_layer)
+        self.output_layer = output_layer

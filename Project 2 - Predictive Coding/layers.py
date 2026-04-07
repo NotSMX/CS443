@@ -205,10 +205,8 @@ class Layer:
         Python list by calling the `list` function — e.g. `list(blah)`.
         '''
         net_in = self.compute_net_input(x)
-
-        if self.do_group_norm and self.gn_gain is not None:
-            net_in = self.compute_group_norm(net_in)
-
+        if self.do_group_norm and self.gn_gain is not None:  
+            net_in = self.compute_group_norm(net_in)          
         net_act = self.compute_net_activation(net_in)
 
         if self.output_shape is None:
@@ -285,6 +283,14 @@ class Layer:
         '''
         if not self.do_group_norm:
             return
+
+        # Initialize per-channel gain (ones) and bias (zeros), shape=(K,) or (H,)
+        K = self.units
+        self.gn_gain = tf.Variable(tf.ones(shape=(K,),  dtype=tf.float32), trainable=True, name='gn_gain')
+        self.gn_bias = tf.Variable(tf.zeros(shape=(K,), dtype=tf.float32), trainable=True, name='gn_bias')
+
+        # Turn off the ordinary bias — replace with a non-trainable zero scalar
+        self.b = tf.Variable(0.0, trainable=False, name='bias')
 
         if self.units is None:
             return
@@ -439,6 +445,21 @@ class Dense(Layer):
         tf.float32 tensor. shape=(B, M).
             The normalized tensor with the same shape as the input tensor.
         '''
+        B_static, H = net_in.shape  # H is always static (known at build time)
+        B_dynamic = tf.shape(net_in)[0]  # use for reshape
+
+        if self.num_groups is None:
+            num_groups = max(round(H / 8), 1)   # H=16 → 2, H=12 → 2, H=64 → 8
+        else:
+            num_groups = self.num_groups
+
+        x = tf.reshape(net_in, (B_dynamic, num_groups, H // num_groups))
+        mean = tf.reduce_mean(x, axis=2, keepdims=True)
+        var  = tf.reduce_mean(tf.square(x - mean), axis=2, keepdims=True)
+        x_norm = (x - mean) / tf.sqrt(var + eps)
+        x_norm = tf.reshape(x_norm, (B_dynamic, H))  # back to (B, H)
+
+        return self.gn_gain * x_norm + self.gn_bias
         _, H = net_in.shape
 
         if self.num_groups is None:

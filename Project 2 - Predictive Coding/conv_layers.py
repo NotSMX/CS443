@@ -131,7 +131,7 @@ class Conv2D(layers.Layer):
 
         Uses `self.num_groups` groups of neurons to perform the normalization. If the user has not set a value for
         `self.num_groups` for the current layer, we set it to the number of units in the layer divided by 8 (rounded).
-        In this case when the user did not specify `self.num_groups`, we do not allow the number of groups to drop below
+        In this case when the user did not specify `self.num_groups`, we do not allow the number of groups to exceed
         8.
 
         (Ignore until later in the semester)
@@ -147,6 +147,8 @@ class Conv2D(layers.Layer):
         --------
         tf.float32 tensor. shape=(B, Iy, Ix, K).
             The normalized tensor with the same shape as the input tensor.
+
+        NOTE: This method should handle the scaling and shifting.
         '''
         _, Iy, Ix, K = net_in.shape
 
@@ -170,6 +172,29 @@ class Conv2D(layers.Layer):
             x_norm = x_norm * tf.reshape(self.gn_gain, [1, 1, 1, K]) + tf.reshape(self.gn_bias, [1, 1, 1, K])
 
         return x_norm
+
+        # Determine number of groups
+        if self.num_groups is None:
+            num_groups = min(round(K / 8), 8)
+        else:
+            num_groups = self.num_groups
+
+        # Reshape into groups: (B, Iy, Ix, num_groups, K // num_groups)
+        x = tf.reshape(net_in, (B, Iy, Ix, num_groups, K // num_groups))
+
+        # Reduce over spatial dims and within-group neurons, but NOT batch or group index
+        axes = [1, 2, 4]
+        mean = tf.reduce_mean(x, axis=axes, keepdims=True)
+        var  = tf.reduce_mean(tf.square(x - mean), axis=axes, keepdims=True)
+
+        # Normalize
+        x_norm = (x - mean) / tf.sqrt(var + eps)
+
+        # Reshape back to (B, Iy, Ix, K)
+        x_norm = tf.reshape(x_norm, (B, Iy, Ix, K))
+
+        # Scale and shift
+        return self.gn_gain * x_norm + self.gn_bias
 
 
     def __str__(self):
@@ -380,11 +405,10 @@ class Conv2DTranspose(Conv2D):
         if self.do_group_norm and self.gn_gain is not None:
             net_in = self.compute_group_norm(net_in)
         net_act = self.compute_net_activation(net_in)
-        import math
-        _, Iy, Ix, _ = x.shape
-        h = math.ceil(int(Iy) / self.strides)
-        w = math.ceil(int(Ix) / self.strides)
-        self.output_shape = [net_act.shape[0], h, w, units_prev]
+
+        # FIX: read shape from net_act, not from x with inverted formula
+        self.output_shape = list(net_act.shape)
+
         return net_act
 
 
