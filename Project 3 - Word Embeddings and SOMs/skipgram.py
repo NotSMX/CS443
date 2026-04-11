@@ -1,6 +1,6 @@
 '''skipgram.py
 The Skipgram neural network
-YOUR NAMES HERE
+DANIEL YU & JORDAN WANG
 CS 443: Bio-Inspired Machine Learning
 Project 3: Word Embeddings and Self-Organizing Maps (SOMs)
 '''
@@ -43,7 +43,10 @@ class Skipgram(network.DeepNetwork):
         1. Call the superclass constructor to pass along parameters that `DeepNetwork` has in common.
         2. Build out and configure the Skipgram network.
         '''
-        pass
+        super().__init__(input_feats_shape=input_feats_shape)
+        self.embedding = Embedding('Embed_0', units=embedding_dim)
+        self.output_layer = Dense('Dense_0', units=C, activation='softmax', prev_layer_or_block=self.embedding, wt_init='he')
+        self.layers = [self.embedding, self.output_layer]
 
     def __call__(self, x):
         '''Forward pass through the Skipgram with the data samples `x`.
@@ -58,7 +61,8 @@ class Skipgram(network.DeepNetwork):
         tf.float32 tensor. shape=(B, C).
             Activations produced by the output layer to the data.
         '''
-        pass
+        embed_act = self.embedding(x)
+        return self.output_layer(embed_act)
 
     def fit(self, x, y, batch_size=256, epochs=10, print_every=1, linear_lr_decay=True, linear_lr_min_lr=1e-5,
             verbose=True):
@@ -104,10 +108,44 @@ class Skipgram(network.DeepNetwork):
         '''
         N = len(x)
         mini_batches = N // batch_size
-
+        total_steps = mini_batches * epochs
+        initial_lr = float(self.opt.learning_rate)
+ 
         # Define loss tracking containers
         train_loss_hist = []
-
+        recent_losses = []
+ 
+        t = 0  # cumulative mini-batch counter
+        for e in range(epochs):
+            # Shuffle data each epoch
+            inds = tf.random.shuffle(tf.range(N))
+            x_shuf = tf.gather(x, inds)
+            y_shuf = tf.gather(y, inds)
+ 
+            for b in range(mini_batches):
+                x_batch = x_shuf[b*batch_size:(b+1)*batch_size]
+                y_batch = y_shuf[b*batch_size:(b+1)*batch_size]
+ 
+                loss = self.train_step(x_batch, y_batch)
+                recent_losses.append(float(loss))
+ 
+                if linear_lr_decay:
+                    self.lr_linear_decay(initial_lr, t, total_steps, linear_lr_min_lr)
+ 
+                t += 1
+ 
+                if t % print_every == 0:
+                    avg_loss = sum(recent_losses) / len(recent_losses)
+                    train_loss_hist.append(avg_loss)
+                    if verbose:
+                        print(f'Epoch {e+1}/{epochs}, mini-batch {t}/{total_steps}, avg loss: {avg_loss:.4f}')
+                    recent_losses = []
+ 
+        # Capture any remaining losses
+        if recent_losses:
+            avg_loss = sum(recent_losses) / len(recent_losses)
+            train_loss_hist.append(avg_loss)
+ 
         print(f'Finished training after {e+1} epochs!')
         return train_loss_hist
 
@@ -130,19 +168,21 @@ class Skipgram(network.DeepNetwork):
             For example, if the lr decay equation says lr should be 0.001 but if min_allowed_lr=0.01, then we actually
             set the lr to 0.01.
         '''
-        pass
+        new_lr = initial_lr * (1 - (t + 1) / num_steps)
+        new_lr = max(new_lr, min_allowed_lr)
+        self.opt.learning_rate.assign(new_lr)
 
     def get_word_embedding(self, wordind):
         '''Given the word index `wordind` retrieve and return the corresponding embedding vector.'''
-        pass
+        return self.embedding.get_wts()[wordind]
 
     def get_all_embeddings(self):
         '''Retrieve and return the embedding vectors for ALL words in the vocab.'''
-        pass
+        return self.embedding.get_wts().numpy()
 
     def get_bias(self):
         '''Retrieve and return the embedding layer bias.'''
-        pass
+        return self.embedding.b.numpy()
 
     def save_embeddings(self, path='export', filename='embeddings.npz'):
         '''Saves the embeddings to disk.

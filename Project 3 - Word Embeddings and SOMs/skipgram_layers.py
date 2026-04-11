@@ -1,6 +1,6 @@
 '''skipgram_layers.py
 New neural network layers used for the Skipgram Network
-YOUR NAMES HERE
+DANIEL YU & JORDAN WANG
 CS 443: Bio-Inspired Machine Learning
 Project 3: Word Embeddings and Self-Organizing Maps (SOMs)
 '''
@@ -31,7 +31,9 @@ class Embedding(Dense):
         You should only need to call and pass in relevant information into the superclass constructor to implement this
         method.
         '''
-        pass
+        super().__init__(name=name, units=units, prev_layer_or_block=prev_layer_or_block,
+                         activation='linear')
+        self.b = tf.Variable(tf.zeros(units), trainable=False)
 
     def compute_net_input(self, x):
         '''Computes the net input for the current Embedding layer.
@@ -61,4 +63,4 @@ class Embedding(Dense):
         # TODO: Handle regular (non-pilot) case during training/inference where `x` has shape (B,) and contains
         # INDICIES to extract corresponding embedding layer weights.
         # Don't forget about the bias!
-        pass
+        return tf.gather(self.wts, x) + self.b
