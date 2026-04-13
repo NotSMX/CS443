@@ -44,6 +44,7 @@ class Skipgram(network.DeepNetwork):
         2. Build out and configure the Skipgram network.
         '''
         super().__init__(input_feats_shape=input_feats_shape)
+        self.C = C
         self.embedding = Embedding('Embed_0', units=embedding_dim)
         self.output_layer = Dense('Dense_0', units=C, activation='softmax', prev_layer_or_block=self.embedding, wt_init='he')
         self.layers = [self.embedding, self.output_layer]

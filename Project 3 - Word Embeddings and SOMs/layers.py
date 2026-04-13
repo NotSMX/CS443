@@ -383,7 +383,7 @@ class Dense(Layer):
         if self.wt_init == 'normal':
             w_init = tf.random.normal(shape=(input_dim, units), stddev=self.wt_scale, dtype=tf.float32)
         elif self.wt_init == 'he':
-            std = tf.sqrt(2.0 / tf.cast(input_dim, tf.float32))
+            std = self.get_kaiming_gain() * tf.sqrt(1.0 / tf.cast(input_dim, tf.float32))
             w_init = tf.random.normal(shape=(input_dim, units), stddev=std, dtype=tf.float32)
         else:
             raise ValueError(f"Unknown wt_init method: {self.wt_init}")
@@ -605,3 +605,4 @@ class Flatten(Layer):
         but this method is provided to you. You should not need to modify it.
         '''
         return f'Flatten layer output({self.layer_name}) shape: {self.output_shape}'
+    

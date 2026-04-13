@@ -32,8 +32,7 @@ class Embedding(Dense):
         method.
         '''
         super().__init__(name=name, units=units, prev_layer_or_block=prev_layer_or_block,
-                         activation='linear')
-        self.b = tf.Variable(tf.zeros(units), trainable=False)
+                         activation='linear', wt_init='he')
 
     def compute_net_input(self, x):
         '''Computes the net input for the current Embedding layer.
@@ -64,3 +63,4 @@ class Embedding(Dense):
         # INDICIES to extract corresponding embedding layer weights.
         # Don't forget about the bias!
         return tf.gather(self.wts, x) + self.b
+    
