@@ -1,6 +1,6 @@
 '''text_dataset_char.py
 Functions to create, organize, and preprocess a character level text dataset
-YOUR NAMES HERE
+DANIEL YU & JORDAN WANG
 CS 443: Bio-inspired Machine Learning
 Project 4: Recurrent Neural Networks
 '''
@@ -37,6 +37,14 @@ class CharLevelDataset:
 
         TODO: Set instance variable for the constructor parameters.
         '''
+
+        # Store constructor params
+        self.file_path = file_path
+        self.pad_char = pad_char
+        self.start_char = start_char
+        self.end_char = end_char
+        self.verbose = verbose
+
 
         # KEEP THE FOLLOWING PLACEHOLDERS, THESE ALL SHOULD BE SET BY THE process METHOD
         self.corpus = None  # Corpus organized as: list of strs, which each str is an entire movie review
@@ -193,8 +201,17 @@ class CharLevelDataset:
         '''
         # Corpus is list of strs (each str is review)
         vocab = sorted(list(set(''.join(corpus))))
+        vocab = [self.pad_char, self.start_char, self.end_char] + vocab
 
-        return vocab
+        # Prevent duplicates if special chars somehow appear in corpus
+        seen = set()
+        vocab_unique = []
+        for ch in vocab:
+            if ch not in seen:
+                vocab_unique.append(ch)
+                seen.add(ch)
+
+        return vocab_unique
 
     def make_char2ind_mapping(self, vocab):
         '''Create dictionary that looks up the index (int) of the char in the vocabulary.
@@ -366,20 +383,35 @@ class CharLevelDataset:
         '''
         # TODO: use existing methods to compute constructor instance variables you don't see already below
 
+        # Load corpus
+        self.corpus = self.load(N_reviews)
+
+        # Build vocab + mappings
+        self.vocab = self.make_vocabulary(self.corpus)
+        self.char2ind_map = self.make_char2ind_mapping(self.vocab)
+        self.ind2char_map = self.make_ind2char_mapping(self.vocab)
+
         if self.verbose:
             print('Number of unique chars/tokens:', len(self.vocab))
 
-        # Subdivide the reviews into train/val/split before making sequences
+        # Train/val split by review
         r_train, r_val = make_train_val_split(self.corpus, prop_val=prop_val)
         splits = {'train': r_train, 'val': r_val}
 
         for split in splits:
-            # TODO: Make the sequences for training the recurrent net
+            # Make sequences
+            seqs_x_str, seqs_y_str = self.make_sequences(
+                splits[split],
+                seq_len=seq_len,
+                seq_overlap=seq_overlap
+            )
 
             if self.verbose:
                 print(f'Number of {split} sequences:', len(seqs_x_str), 'of length', seq_len)
 
-            # TODO: Convert char to int code
+            # Convert to int
+            seqs_x_int = self.convert_str2int(seqs_x_str, self.char2ind_map)
+            seqs_y_int = self.convert_str2int(seqs_y_str, self.char2ind_map)
 
             if self.verbose:
                 print(f'  {seqs_x_int.shape=} {seqs_y_int.shape=}')
@@ -389,10 +421,12 @@ class CharLevelDataset:
                 self.seqs_y_train_int = seqs_y_int
                 self.seqs_x_train_str = seqs_x_str
                 self.seqs_y_train_str = seqs_y_str
+
             elif split == 'val':
                 self.seqs_x_val_int = seqs_x_int
                 self.seqs_y_val_int = seqs_y_int
                 self.seqs_x_val_str = seqs_x_str
                 self.seqs_y_val_str = seqs_y_str
+
             else:
                 raise ValueError('Unsupported split')

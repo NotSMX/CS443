@@ -1,6 +1,6 @@
 '''rnn_layers.py
 New layers specific to the RNN network
-YOUR NAMES HERE
+DANIEL YU & JORDAN WANG
 CS 443: Bio-inspired Machine Learning
 Project 4: Recurrent Neural Networks
 '''
@@ -28,6 +28,14 @@ class GRU(layers.Layer):
         TODO: Call the superclass constructor, filling in all relevant information. Assign any additional parameters as
         instance vars as needed.
         '''
+        super().__init__(
+            layer_name=name,
+            activation='linear',   # REQUIRED
+            prev_layer_or_block=prev_layer_or_block
+        )
+
+        self.units = units
+
 
         # Wts and bias placeholders
         # Update gate related wts/bias
@@ -111,7 +119,30 @@ class GRU(layers.Layer):
         4. Use He/Kaiming initialization. See the notes and notebook for refreshers on the gains and the strategy for
         the hidden-to-hidden weights.
         '''
-        pass
+        if hasattr(input_shape, "as_list"):
+            input_shape = input_shape.as_list()
+
+        H_prev = int(input_shape[-1])
+        H = int(self.units)
+
+        def he(shape, fan_in, gain=1.0):
+            std = gain * tf.sqrt(1.0 / tf.cast(fan_in, tf.float32))
+            return tf.random.normal(shape=shape, stddev=std, dtype=tf.float32)
+
+        # Update gate
+        self.wts_update_i2h = tf.Variable(he((H_prev, H), H_prev, gain=1.0), trainable=True)
+        self.wts_update_h2h = tf.Variable(tf.eye(H, dtype=tf.float32), trainable=True)  # no random draw
+        self.update_b       = tf.Variable(tf.zeros((H,), tf.float32), trainable=True)   # no random draw
+
+        # Reset gate
+        self.wts_reset_i2h  = tf.Variable(he((H_prev, H), H_prev, gain=1.0), trainable=True)
+        self.wts_reset_h2h  = tf.Variable(tf.eye(H, dtype=tf.float32), trainable=True)  # no random draw
+        self.reset_b        = tf.Variable(tf.zeros((H,), tf.float32), trainable=True)   # no random draw
+
+        # Candidate gate
+        self.wts_cand_i2h = tf.Variable(he((H_prev, H), H_prev, gain=5.0/3.0), trainable=True)
+        self.wts_cand_h2h = tf.Variable(tf.eye(H, dtype=tf.float32), trainable=True)  # identity, not He
+        self.cand_b       = tf.Variable(tf.zeros((H,), tf.float32), trainable=True)
 
     def get_wts(self):
         '''Return all the weights in the layer in a Python list.
@@ -166,7 +197,16 @@ class GRU(layers.Layer):
         if self.wts_update_i2h is None:
             self.init_params(input_shape=x.shape)
 
-        pass
+        # update gate
+        z = tf.matmul(x, self.wts_update_i2h) + tf.matmul(state, self.wts_update_h2h) + self.update_b
+
+        # reset gate
+        r = tf.matmul(x, self.wts_reset_i2h) + tf.matmul(state, self.wts_reset_h2h) + self.reset_b
+
+        # candidate — apply sigmoid to r here so reset gates the recurrent part correctly
+        h_tilde = tf.matmul(x, self.wts_cand_i2h) + self.cand_b
+
+        return z, r, h_tilde
 
     def compute_net_activation(self, update_gate_in, reset_gate_in, cand_in, state):
         '''Computes the state and net activation of the GRU Layer for the current time step.
@@ -191,8 +231,13 @@ class GRU(layers.Layer):
         tf.float32 tensor. shape=(B, H).
             The reset gate computed for the current time step.
         '''
-        pass
+        z = tf.sigmoid(update_gate_in)
+        r = tf.sigmoid(reset_gate_in)
+        h_tilde = tf.tanh(cand_in + r * state)  # recurrent added here, after reset is activated
 
+        new_state = (1.0 - z) * state + z * h_tilde
+        return new_state, z, r
+    
     def reset_state(self, B):
         '''Returns the reset/default GRU state of 0s for all neurons.
 
@@ -206,7 +251,7 @@ class GRU(layers.Layer):
         tf.float32 tensor. shape=(B, H).
             The reset/default GRU state of 0s for all neurons.
         '''
-        pass
+        return tf.zeros((B, self.units), dtype=tf.float32)
 
     def __call__(self, x, mask, state=None):
         '''Do a forward pass thru the GRU layer with mini-batch `x`.
@@ -240,6 +285,22 @@ class GRU(layers.Layer):
         a Python list by calling the `list` function — e.g. `list(blah)`.
         '''
         B, T, H_prev = x.shape
+        if state is None:
+            state = self.reset_state(B)
+
+        outputs = []
+        for t in range(T):
+            x_t = x[:, t, :]
+            m_t = mask[:, t, :]
+            z_in, r_in, c_in = self.compute_net_input(x_t, state)
+            new_state, _, _ = self.compute_net_activation(z_in, r_in, c_in, state)
+            state = m_t * new_state + (1.0 - m_t) * state
+            outputs.append(state)  # append AFTER update
+
+        out = tf.stack(outputs, axis=1)  # (T, B, H)
+        if self.output_shape is None:
+            self.output_shape = [B, T, self.units]
+        return out
 
 
     def __str__(self):

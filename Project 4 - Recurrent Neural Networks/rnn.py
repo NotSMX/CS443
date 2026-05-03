@@ -1,6 +1,6 @@
 '''rnn.py
 Recurrent neural networks (RNNs) for text generation
-YOUR NAMES HERE
+DANIEL YU & JORDAN WANG
 CS 443: Bio-inspired Machine Learning
 Project 4: Recurrent Neural Networks
 '''
@@ -38,6 +38,12 @@ class RNN(network.DeepNetwork):
         1. Call the superclass constructor to pass along parameters that `DeepNetwork` has in common.
         2. Create instance variables for parameters as needed.
         '''
+        super().__init__(input_feats_shape=input_feats_shape)
+ 
+        self.C = C
+        self.pad_int = pad_token
+        self.start_int = start_token
+        self.end_int = end_token
 
         # KEEP THE FOLLOWING
         # This is a list of boolean values that has length = layers in the net.
@@ -84,11 +90,32 @@ class RNN(network.DeepNetwork):
         rather than tf.reshape(blah, -1).
 
         '''
-        if self.loss_name == 'temporal_cross_entropy':
-            pass
-        else:
-            raise ValueError(f'Unknown loss function {self.loss_name}')
-
+        if self.loss_name != 'temporal_cross_entropy':
+            raise ValueError(f'Unknown loss function {self.loss_name}. RNN only supports temporal_cross_entropy.')
+ 
+        B = tf.shape(out_net_act)[0]
+        T = tf.shape(out_net_act)[1]
+ 
+        # Flatten (B, T, C) -> (B*T, C) and (B, T) -> (B*T,)
+        net_act_flat = tf.reshape(out_net_act, [-1, self.C])          # (B*T, C)
+        y_flat = tf.reshape(tf.cast(y, tf.int32), [-1])               # (B*T,)
+        mask_flat = tf.reshape(mask, [-1])                             # (B*T,)
+ 
+        # Use one_hot to extract true class probabilities safely.
+        # Out-of-range y indices produce all-zero one_hot rows -> p=0 -> log(eps).
+        y_onehot = tf.one_hot(y_flat, depth=self.C, dtype=tf.float32) # (B*T, C)
+        p_true = tf.reduce_sum(net_act_flat * y_onehot, axis=1)       # (B*T,)
+ 
+        # Cross entropy per token
+        token_loss = -tf.math.log(p_true + eps)                       # (B*T,)
+ 
+        # Only count non-padding tokens
+        token_loss_masked = token_loss * mask_flat                     # (B*T,)
+ 
+        # Normalize by number of non-padding tokens
+        num_valid = tf.reduce_sum(mask_flat) + eps
+        loss = tf.reduce_sum(token_loss_masked) / num_valid
+ 
         return loss
 
     def __call__(self, x, mask=None, states=None):
@@ -123,12 +150,40 @@ class RNN(network.DeepNetwork):
         '''
         # Should just be hit when doing pilot forward pass. Otherwise, should always be created in train_step/test_step
         # By default, we don't mask out any states
+        # Default mask: don't mask anything
         if mask is None:
-            mask = tf.ones([1, x.shape[1], 1], dtype=tf.float32)
-
+            mask = tf.ones([tf.shape(x)[0], x.shape[1], 1], dtype=tf.float32)
+ 
         rec_layer_states = []
-
-
+        rec_layer_idx = 0
+ 
+        # Forward pass layer by layer
+        layer_list = []
+        layer = self.output_layer
+        while layer is not None:
+            layer_list.append(layer)
+            layer = layer.get_prev_layer_or_block()
+        layer_list = list(reversed(layer_list))  # input → output order
+ 
+        net_act = x
+        for i, layer in enumerate(layer_list):
+            is_rec = self.is_recurrent_layer[i]
+            if is_rec:
+                # Get initial state for this recurrent layer
+                if states is not None and rec_layer_idx < len(states):
+                    init_state = states[rec_layer_idx]
+                else:
+                    init_state = None
+ 
+                # GRU __call__ returns (B, T, H) or (T, B, H) depending on axis
+                net_act = layer(net_act, mask, state=init_state)
+ 
+                # Store last state: net_act is (B, T, H), last time step = net_act[:, -1, :]
+                rec_layer_states.append(net_act[:, -1, :])
+                rec_layer_idx += 1
+            else:
+                net_act = layer(net_act)
+ 
         return net_act, tuple(rec_layer_states)
 
     @tf.function
@@ -238,6 +293,10 @@ class RNN(network.DeepNetwork):
         # a. Handle 1st token, which we assume will always be the start token
         _, states = self(tf.reshape(tf.constant(self.start_int, dtype=tf.int32), [1, 1]))
         # b. TODO: Process the rest of the prompt, except last prompt token. Allow states to progressively build.
+        for token in prompt_int[:-1]:
+            x_tok = tf.reshape(tf.constant(token, dtype=tf.int32), [1, 1])
+            _, states = self(x_tok, states=states)
+
 
         '''3: Generate new chars using a feedback loop (prev pred = next input), starting with last prompt char'''
         seq_gen_int = [prompt_int[-1]]
@@ -249,8 +308,13 @@ class RNN(network.DeepNetwork):
 
             # TODO: Compute net_act (B=1, T=1, vocab_sz) at output layer and updated recurrent layer states for the
             # current token
+            net_act, states = self(x_int_tf, states=states)
 
             # TODO: Extract the softmax probs at the final time step
+            # net_act shape: (1, 1, C) — extract softmax probs at the single time step
+            out_probs_np = net_act[0, -1, :].numpy().astype(np.float64)
+            # Normalize to sum to 1 (handle any floating point drift)
+            out_probs_np = out_probs_np / out_probs_np.sum()
 
             # Draw predicted char index from vocab proportional to the softmax prob
             pred_char_int = rng.choice(np.arange(len(out_probs_np)), p=out_probs_np)
@@ -258,12 +322,18 @@ class RNN(network.DeepNetwork):
             pred_char_int = pred_char_int.item()
 
             # TODO: Get out of loop if net decides it is done / time to end the generated sequence
+            if pred_char_int == self.end_int:
+                break
+ 
 
             # TODO: Append to generated seq, the char corresponding to the predicted index in the vocab
+            seq_gen_int.append(pred_char_int)
 
         '''4: TODO: Convert the generated int tokens to chars'''
+        generated_chars = [ind2char_map[i] for i in seq_gen_int[1:]]
 
         '''5: TODO: Concat the prompt and the generated seq'''
+        generated_text = prompt + ''.join(generated_chars)
 
         return generated_text
 
@@ -296,7 +366,18 @@ class GRU_RNN1Mini(RNN):
         1. Call the superclass constructor to pass along parameters that `DeepNetwork` has in common.
         2. Build out the network like usual. NOTE: you should populate the self.is_recurrent_layer list.
         '''
-        pass
+        super().__init__(input_feats_shape=input_feats_shape, C=C)
+ 
+        # Build layers: Embedding → GRU → Dense(output)
+        embed = Embedding(name='Embedding', units=embedding_dim)
+        gru = GRU(name='GRU_1', units=rnn_units, prev_layer_or_block=embed)
+        output = Dense(name='Output', units=C, activation='softmax',
+                       wt_init='he', prev_layer_or_block=gru)
+ 
+        self.output_layer = output
+ 
+        # is_recurrent_layer in input→output order: [Embed, GRU, Dense]
+        self.is_recurrent_layer = [False, True, False]
 
 
 class GRU_RNN1(GRU_RNN1Mini):
@@ -326,7 +407,8 @@ class GRU_RNN1(GRU_RNN1Mini):
         NOTE: This has the same architecture as GRU_RNN1Mini (only number of units different) so you can build this
         with one line of code :)
         '''
-        pass
+        super().__init__(input_feats_shape=input_feats_shape, C=C,
+                         embedding_dim=embedding_dim, rnn_units=rnn_units)
 
 
 class GRU_RNN2(RNN):
@@ -359,7 +441,20 @@ class GRU_RNN2(RNN):
         1. Call the superclass constructor to pass along parameters that `DeepNetwork` has in common.
         2. Build out the network like usual. NOTE: you should populate the self.is_recurrent_layer list.
         '''
-        pass
+        super().__init__(input_feats_shape=input_feats_shape, C=C)
+ 
+        embed   = Embedding(name='Embedding', units=embedding_dim)
+        gru1    = GRU(name='GRU_1', units=rnn_units[0], prev_layer_or_block=embed)
+        drop1   = Dropout(name='Dropout_1', rate=dropout_rates[0], prev_layer_or_block=gru1)
+        gru2    = GRU(name='GRU_2', units=rnn_units[1], prev_layer_or_block=drop1)
+        drop2   = Dropout(name='Dropout_2', rate=dropout_rates[1], prev_layer_or_block=gru2)
+        output  = Dense(name='Output', units=C, activation='softmax',
+                        wt_init='he', prev_layer_or_block=drop2)
+ 
+        self.output_layer = output
+ 
+        # [Embed, GRU1, Drop1, GRU2, Drop2, Dense]
+        self.is_recurrent_layer = [False, True, False, True, False, False]  
 
 
 class GRU_RNN2XL(GRU_RNN2):
@@ -391,7 +486,9 @@ class GRU_RNN2XL(GRU_RNN2):
         NOTE: This has the same architecture as GRU_RNN2 (only number of units / parameters different) so you can build
         this with one line of code :)
         '''
-        pass
+        super().__init__(input_feats_shape=input_feats_shape, C=C,
+                         embedding_dim=embedding_dim, rnn_units=rnn_units,
+                         dropout_rates=dropout_rates)
 
 
 class GRU_RNN3(RNN):
@@ -424,4 +521,19 @@ class GRU_RNN3(RNN):
         1. Call the superclass constructor to pass along parameters that `DeepNetwork` has in common.
         2. Build out the network like usual. NOTE: you should populate the self.is_recurrent_layer list.
         '''
-        pass
+        super().__init__(input_feats_shape=input_feats_shape, C=C)
+ 
+        embed   = Embedding(name='Embedding', units=embedding_dim)
+        gru1    = GRU(name='GRU_1', units=rnn_units[0], prev_layer_or_block=embed)
+        drop1   = Dropout(name='Dropout_1', rate=dropout_rates[0], prev_layer_or_block=gru1)
+        gru2    = GRU(name='GRU_2', units=rnn_units[1], prev_layer_or_block=drop1)
+        drop2   = Dropout(name='Dropout_2', rate=dropout_rates[1], prev_layer_or_block=gru2)
+        gru3    = GRU(name='GRU_3', units=rnn_units[2], prev_layer_or_block=drop2)
+        drop3   = Dropout(name='Dropout_3', rate=dropout_rates[2], prev_layer_or_block=gru3)
+        output  = Dense(name='Output', units=C, activation='softmax',
+                        wt_init='he', prev_layer_or_block=drop3)
+ 
+        self.output_layer = output
+ 
+        # [Embed, GRU1, Drop1, GRU2, Drop2, GRU3, Drop3, Dense]
+        self.is_recurrent_layer = [False, True, False, True, False, True, False, False]
