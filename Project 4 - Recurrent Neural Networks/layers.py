@@ -606,3 +606,31 @@ class Flatten(Layer):
         '''
         return f'Flatten layer output({self.layer_name}) shape: {self.output_shape}'
     
+    def save_wts(self):
+        '''Load saved weights and bias from disk and replace any existing ones in the layer.
+
+        (This method is provided to you. It should not requre modification.)
+
+        Parameters:
+        -----------
+        file_path: str.
+            File path to the stored wts/bias.
+        '''
+        params = {}
+        params['wts'] = self.wts.numpy()
+        params['b'] = self.b.numpy()
+
+        return params
+
+    def load_wts(self, params):
+        '''Load saved weights and bias from disk and replace any existing ones in the layer.
+
+        (This method is provided to you. It should not requre modification.)
+
+        Parameters:
+        -----------
+        file_path: str.
+            File path to the stored wts/bias.
+        '''
+        self.wts.assign(params['wts'])
+        self.b.assign(params['b'])

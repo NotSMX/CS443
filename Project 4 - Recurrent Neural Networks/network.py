@@ -4,6 +4,7 @@ Daniel Yu & Jordan Wang
 CS 443: Bio-Inspired Learning
 '''
 import time
+import os
 import numpy as np
 import tensorflow as tf
 
@@ -656,3 +657,63 @@ class DeepNetwork:
         self.opt.learning_rate = new_lr
 
         print(f"Learning rate after decay: {self.opt.learning_rate}")
+
+    def load_wts(self, path='export', filename='params.npz'):
+        '''Load saved weights and bias from disk and replace any existing ones in the layer.
+
+        (This method is mostly provided to you, except see the one todo item below)
+
+        Parameters:
+        -----------
+        file_path: str.
+            File path to the stored wts/bias.
+        '''
+        # Load the flattened dictionary of wts+biases
+        full_path = os.path.join(path, filename)
+        params = dict(np.load(full_path))
+
+        layer = self.output_layer
+        while layer is not None:
+            if layer.has_wts():
+                # Now lets grab the params for the current layer and package in another dictionary
+                curr_layer_params = {}
+                # Filter out param names pertinent to curr layer only
+                # For example, for output layer, turns ['DenseHidden/wts', 'Output/wts', 'Output/b']
+                # into ['Output/wts', 'Output/b']
+                curr_layer_param_names = [param_name for param_name in params if layer.get_name() + '/' in param_name]
+                for curr_param_name in curr_layer_param_names:
+                    name_list = curr_param_name.split('/')  # will make 'Output/wts' look like ['Output', 'wts']
+                    curr_layer_params[name_list[-1]] = params[curr_param_name]
+                layer.load_wts(curr_layer_params)
+
+            layer = layer.get_prev_layer_or_block()
+
+    def save_wts(self, path='export', filename='params.npz'):
+        '''Load saved weights and bias from disk and replace any existing ones in the layer.
+
+        (This method is mostly provided to you, except see the one todo item below)
+
+        Parameters:
+        -----------
+        file_path: str.
+            File path to the stored wts/bias.
+        '''
+        full_path = os.path.join(path, filename)
+
+        if not os.path.exists(path):
+            os.makedirs(path, exist_ok=True)
+
+        params = {}
+
+        layer = self.output_layer
+        while layer is not None:
+            if layer.has_wts():
+                # Get a dictionary of all the layer's wts+biases
+                layer_params = layer.save_wts()
+                # Unpack each wt/bias object and insert it into net's dictionary, organized by layer name prepended
+                # to the param name
+                for param_name in layer_params:
+                    params[layer.get_name() + '/'+ param_name] = layer_params[param_name]
+
+            layer = layer.get_prev_layer_or_block()
+        np.savez_compressed(full_path, **params)
