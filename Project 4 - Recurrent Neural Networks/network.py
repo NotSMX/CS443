@@ -484,11 +484,11 @@ class DeepNetwork:
                             num_lr_decays += 1
                             # Clear the rolling window so we wait for the next patience cycle
                             recent_val_losses_lr = []
-                            
+
                 if verbose:
                     print(f'Epoch {e}/{max_epochs-1}, Training loss {avg_train_loss:.6f}, '
                         f'Val loss {float(val_loss.numpy()):.6f}, Val acc {float(val_acc.numpy()):.4f}')
-                
+
                 # Check early stopping
                 if stop:
                     if verbose:
